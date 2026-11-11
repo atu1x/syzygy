@@ -2,7 +2,7 @@
  * ┏━┓╻ ╻╺━┓╻ ╻┏━╸╻ ╻
  * ┗━┓┗┳┛┏━┛┗┳┛┃╺┓┗┳┛
  * ┗━┛ ╹ ┗━╸ ╹ ┗━┛ ╹
- * syzygy™ - A C++ 2D rendering library with cross-platform support.
+ * syzygy - A C++ 2D rendering library with cross-platform support.
  * Copyright (C) 2026 - atu1x
  */
 #pragma once

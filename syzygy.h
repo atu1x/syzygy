@@ -10,6 +10,30 @@
 #include <atomic>
 #include <memory>
 
+//forward declarations of core functions. (because of readability/accessibility)
+namespace syzygy {
+	namespace core {
+		namespace win {
+			//typeshit
+			extern void setup();
+			extern void destroy();
+			extern void present();
+		}
+		namespace mac {
+
+		}
+		namespace linux_x11 {
+
+		}
+		namespace linux_wayland {
+
+		}
+		namespace unknown { //for users
+			//write yourself :clown:
+		}
+	}
+}
+
 namespace syzygy {
 	struct syzvec2 { float x = 0.f, y = 0.f; };
 	struct syzvec3 { float x = 0.f, y = 0.f, z = 0.f; };
@@ -26,6 +50,11 @@ namespace syzygy {
 		inline void setup() {
 			syzygy::database::instances.clear();
 			syzygy::database::initialized = true;
+		}
+		inline void present() {
+			//get device? idk :sob:
+			//send it to dagestan for 2 or 3 years and forget:
+			//if (instance.device == device_list::win) syzygy::core::win::present();
 		}
 	}
 
@@ -50,3 +79,9 @@ namespace syzygy {
 		}
 	};
 }
+
+//main core (implementation)
+inline void syzygy::core::win::setup() {
+
+}
+//typeshit

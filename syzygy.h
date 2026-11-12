@@ -10,26 +10,36 @@
 #include <atomic>
 #include <memory>
 
-//forward declarations of core functions. (because of readability/accessibility)
+//forward declaration of core part.
 namespace syzygy {
+	struct instance_context;
+
 	namespace core {
-		namespace win {
-			//typeshit
-			extern void setup();
-			extern void destroy();
-			extern void present();
+		namespace win { //windows is the highest priority. firstly we implement this part.
+			extern void create_overlay(instance_context& context);
+			extern void destroy_overlay(instance_context& context);
+			extern void present(instance_context& context);
 		}
 		namespace mac {
-
+			extern void create_overlay(instance_context& context);
+			extern void destroy_overlay(instance_context& context);
+			extern void present(instance_context& context);
 		}
 		namespace linux_x11 {
-
+			extern void create_overlay(instance_context& context);
+			extern void destroy_overlay(instance_context& context);
+			extern void present(instance_context& context);
+		
 		}
 		namespace linux_wayland {
-
+			extern void create_overlay(instance_context& context);
+			extern void destroy_overlay(instance_context& context);
+			extern void present(instance_context& context);
 		}
-		namespace unknown { //for users
-			//write yourself :clown:
+		namespace unknown {
+			extern void create_overlay(instance_context& context);
+			extern void destroy_overlay(instance_context& context);
+			extern void present(instance_context& context);
 		}
 	}
 }
@@ -51,10 +61,16 @@ namespace syzygy {
 			syzygy::database::instances.clear();
 			syzygy::database::initialized = true;
 		}
-		inline void present() {
-			//get device? idk :sob:
-			//send it to dagestan for 2 or 3 years and forget:
-			//if (instance.device == device_list::win) syzygy::core::win::present();
+
+		inline void transfer_create_overlay(instance_context& context) {
+			//get device from instance context
+			//like
+
+			//if (context.device == device_list::win) syzygy::core::win::create_overlay(context);
+			//else if (context.device == device_list::mac) syzygy::core::mac::create_overlay(context);
+			//else if (context.device == device_list::linux_x11) syzygy::core::linux_x11::create_overlay(context);
+			//else if (context.device == device_list::linux_wayland) syzygy::core::linux_wayland::create_overlay(context);
+			//else if (context.device == device_list::unknown) syzygy::core::unknown::create_overlay(context); //user has to write the adaptation code.
 		}
 	}
 
@@ -80,8 +96,22 @@ namespace syzygy {
 	};
 }
 
-//main core (implementation)
-inline void syzygy::core::win::setup() {
+inline void syzygy::core::win::create_overlay(instance_context& context) {}
+inline void syzygy::core::win::destroy_overlay(instance_context& context) {}
+inline void syzygy::core::win::present(instance_context& context) {}
 
-}
-//typeshit
+inline void syzygy::core::mac::create_overlay(instance_context& context) {}
+inline void syzygy::core::mac::destroy_overlay(instance_context& context) {}
+inline void syzygy::core::mac::present(instance_context& context) {}
+
+inline void syzygy::core::linux_x11::create_overlay(instance_context& context) {}
+inline void syzygy::core::linux_x11::destroy_overlay(instance_context& context) {}
+inline void syzygy::core::linux_x11::present(instance_context& context) {}
+
+inline void syzygy::core::linux_wayland::create_overlay(instance_context& context) {}
+inline void syzygy::core::linux_wayland::destroy_overlay(instance_context& context) {}
+inline void syzygy::core::linux_wayland::present(instance_context& context) {}
+
+inline void syzygy::core::unknown::create_overlay(instance_context& context) {}
+inline void syzygy::core::unknown::destroy_overlay(instance_context& context) {}
+inline void syzygy::core::unknown::present(instance_context& context) {}

@@ -15,6 +15,53 @@
 #include <cstdint>
 #include <thread>
 #include <chrono>
+#include <algorithm>
+#include <string>
+#include <cmath>
+
+//forward declaration of core part.
+namespace syzygy {
+	struct screen_context;
+	struct instance_context;
+
+	namespace core {
+		namespace win {
+			extern screen_context get_screen_information(instance_context& context);
+			extern bool create_overlay(instance_context& context);
+			extern bool destroy_overlay(instance_context& context);
+			extern void present(instance_context& context);
+			extern void vsync(instance_context& context);
+		}
+		namespace mac {
+			extern screen_context get_screen_information(instance_context& context);
+			extern bool create_overlay(instance_context& context);
+			extern bool destroy_overlay(instance_context& context);
+			extern void present(instance_context& context);
+			extern void vsync(instance_context& context);
+		}
+		namespace linux_x11 {
+			extern screen_context get_screen_information(instance_context& context);
+			extern bool create_overlay(instance_context& context);
+			extern bool destroy_overlay(instance_context& context);
+			extern void present(instance_context& context);
+			extern void vsync(instance_context& context);
+		}
+		namespace linux_wayland {
+			extern screen_context get_screen_information(instance_context& context);
+			extern bool create_overlay(instance_context& context);
+			extern bool destroy_overlay(instance_context& context);
+			extern void present(instance_context& context);
+			extern void vsync(instance_context& context);
+		}
+		namespace unknown {
+			extern screen_context get_screen_information(instance_context& context);
+			extern bool create_overlay(instance_context& context);
+			extern bool destroy_overlay(instance_context& context);
+			extern void present(instance_context& context);
+			extern void vsync(instance_context& context);
+		}
+	}
+}
 
 namespace syzygy {
 	struct syzvec2 { float x = 0.f, y = 0.f; };
@@ -62,6 +109,13 @@ namespace syzygy {
 		std::chrono::steady_clock::time_point last_frame_time = std::chrono::steady_clock::now();
 	};
 
+	namespace logger {
+		inline std::vector<std::string> history;
+		inline void send(const std::string& string) {
+			history.push_back(string);
+		}
+	}
+
 	namespace database {
 		inline std::vector<std::unique_ptr<instance_context>> instances = {};
 		inline std::atomic<bool> initialized{ false };
@@ -88,14 +142,70 @@ namespace syzygy {
 #endif
 		}
 
-		//temporarily empty
 		inline screen_context get_screen_information(instance_context& instance) {
-			if (instance.device == device_list::win);
-			else if (instance.device == device_list::mac);
-			else if (instance.device == device_list::linux_x11);
-			else if (instance.device == device_list::linux_wayland);
-			else if (instance.device == device_list::unknown);
-			return {};
+			if (instance.device == device_list::win) return syzygy::core::win::get_screen_information(instance);
+			else if (instance.device == device_list::mac) return syzygy::core::mac::get_screen_information(instance);
+			else if (instance.device == device_list::linux_x11) return syzygy::core::linux_x11::get_screen_information(instance);
+			else if (instance.device == device_list::linux_wayland) return syzygy::core::linux_wayland::get_screen_information(instance);
+			else return syzygy::core::unknown::get_screen_information(instance);
+		}
+
+		inline bool create_overlay(instance_context& instance) {
+			if (instance.device == device_list::win) return syzygy::core::win::create_overlay(instance);
+			else if (instance.device == device_list::mac) return syzygy::core::mac::create_overlay(instance);
+			else if (instance.device == device_list::linux_x11) return syzygy::core::linux_x11::create_overlay(instance);
+			else if (instance.device == device_list::linux_wayland) return syzygy::core::linux_wayland::create_overlay(instance);
+			else return syzygy::core::unknown::create_overlay(instance);
+		}
+
+		inline bool destroy_overlay(instance_context& instance) {
+			if (instance.device == device_list::win) return syzygy::core::win::destroy_overlay(instance);
+			else if (instance.device == device_list::mac) return syzygy::core::mac::destroy_overlay(instance);
+			else if (instance.device == device_list::linux_x11) return syzygy::core::linux_x11::destroy_overlay(instance);
+			else if (instance.device == device_list::linux_wayland) return syzygy::core::linux_wayland::destroy_overlay(instance);
+			else return syzygy::core::unknown::destroy_overlay(instance);
+		}
+
+		inline void present(instance_context& instance) {
+			if (instance.device == device_list::win) syzygy::core::win::present(instance);
+			else if (instance.device == device_list::mac) syzygy::core::mac::present(instance);
+			else if (instance.device == device_list::linux_x11) syzygy::core::linux_x11::present(instance);
+			else if (instance.device == device_list::linux_wayland) syzygy::core::linux_wayland::present(instance);
+			else syzygy::core::unknown::present(instance);
+		}
+
+		inline void vsync(instance_context& instance) {
+			if (instance.device == device_list::win) syzygy::core::win::vsync(instance);
+			else if (instance.device == device_list::mac) syzygy::core::mac::vsync(instance);
+			else if (instance.device == device_list::linux_x11) syzygy::core::linux_x11::vsync(instance);
+			else if (instance.device == device_list::linux_wayland) syzygy::core::linux_wayland::vsync(instance);
+			else syzygy::core::unknown::vsync(instance);
+		}
+
+		inline void internal_drawrect(instance_context& instance, const drawrect_context& rect) {
+			int canvas_w = static_cast<int>(instance.screen.field.z - instance.screen.field.x);
+			int canvas_h = static_cast<int>(instance.screen.field.w - instance.screen.field.y);
+			if (canvas_w <= 0 || canvas_h <= 0) return;
+
+			int start_x = std::clamp(static_cast<int>(rect.field.x), 0, canvas_w);
+			int start_y = std::clamp(static_cast<int>(rect.field.y), 0, canvas_h);
+			int end_x = std::clamp(static_cast<int>(rect.field.z), 0, canvas_w);
+			int end_y = std::clamp(static_cast<int>(rect.field.w), 0, canvas_h);
+
+			for (int y = start_y; y < end_y; ++y) {
+				for (int x = start_x; x < end_x; ++x) {
+					instance.pixels[y * canvas_w + x] = rect.color;
+				}
+			}
+		}
+
+		inline void accomplish_command_request(instance_context& instance) {
+			std::lock_guard<std::mutex> lock(instance.command_mutex);
+			for (const auto& cmd : instance.command_list) {
+				if (cmd.variant == command_variants::rect) {
+					syzygy::backend::internal_drawrect(instance, std::get<drawrect_context>(cmd.context));
+				}
+			}
 		}
 
 		inline void thread_handling(instance_context* instance) {
@@ -107,7 +217,17 @@ namespace syzygy {
 
 			while (instance->render_state == render_state_list::running) {
 				//initialization of canvas / command list
-				std::fill(instance->pixels.begin(), instance->pixels.end(), instance->transparent_color);
+				
+				//resize / pixel buffer
+				int canvas_w = static_cast<int>(instance->screen.field.z - instance->screen.field.x);
+				int canvas_h = static_cast<int>(instance->screen.field.w - instance->screen.field.y);
+				size_t required_size = static_cast<size_t>(std::max(0, canvas_w) * std::max(0, canvas_h));
+
+				if (instance->pixels.size() != required_size) {
+					instance->pixels.resize(required_size);
+				}
+
+				std::fill(instance->pixels.begin(), instance->pixels.end(), instance->transparent_color); 
 				{
 					std::lock_guard<std::mutex> lock(instance->command_mutex);
 					instance->command_list.clear();
@@ -119,13 +239,13 @@ namespace syzygy {
 				}
 				
 				//literally function name explains. no explanation needed.
-				// handle_commands(*instance);
-				// present(*instance);
-				// vsync(*instance);
+				syzygy::backend::accomplish_command_request(*instance);
+				//present(*instance);
+				//vsync(*instance);
 			}
 
-			// destruction of window (when closed)
-			// destroy_overlay(*instance);
+			//destruction of window (when closed)
+			//destroy_overlay(*instance);
 		}
 	}
 
@@ -176,4 +296,41 @@ namespace syzygy {
 			syzygy::database::initialized = false;
 		}
 	};
+}
+
+inline syzygy::screen_context syzygy::core::win::get_screen_information(instance_context& context) { return {}; }
+inline bool syzygy::core::win::create_overlay(instance_context& context) { return false; }
+inline bool syzygy::core::win::destroy_overlay(instance_context& context) { return false; }
+inline void syzygy::core::win::present(instance_context& context) {}
+inline void syzygy::core::win::vsync(instance_context& context) {}
+
+inline syzygy::screen_context syzygy::core::mac::get_screen_information(instance_context& context) { return {}; }
+inline bool syzygy::core::mac::create_overlay(instance_context& context) { return false; }
+inline bool syzygy::core::mac::destroy_overlay(instance_context& context) { return false; }
+inline void syzygy::core::mac::present(instance_context& context) {}
+inline void syzygy::core::mac::vsync(instance_context& context) {}
+
+inline syzygy::screen_context syzygy::core::linux_x11::get_screen_information(instance_context& context) { return {}; }
+inline bool syzygy::core::linux_x11::create_overlay(instance_context& context) { return false; }
+inline bool syzygy::core::linux_x11::destroy_overlay(instance_context& context) { return false; }
+inline void syzygy::core::linux_x11::present(instance_context& context) {}
+inline void syzygy::core::linux_x11::vsync(instance_context& context) {}
+
+inline syzygy::screen_context syzygy::core::linux_wayland::get_screen_information(instance_context& context) { return {}; }
+inline bool syzygy::core::linux_wayland::create_overlay(instance_context& context) { return false; }
+inline bool syzygy::core::linux_wayland::destroy_overlay(instance_context& context) { return false; }
+inline void syzygy::core::linux_wayland::present(instance_context& context) {}
+inline void syzygy::core::linux_wayland::vsync(instance_context& context) {}
+
+inline syzygy::screen_context syzygy::core::unknown::get_screen_information(instance_context& context) { return {}; }
+inline bool syzygy::core::unknown::create_overlay(instance_context& context) { return false; }
+inline bool syzygy::core::unknown::destroy_overlay(instance_context& context) { return false; }
+inline void syzygy::core::unknown::present(instance_context& context) {}
+inline void syzygy::core::unknown::vsync(instance_context& context) {
+	float fps = context.screen.refresh_rate > 0.f ? context.screen.refresh_rate : 60.f;
+	auto frame_duration = std::chrono::duration< float, std::milli >(1000.f / fps);
+	auto next_frame = context.last_frame_time + std::chrono::duration_cast<std::chrono::steady_clock::duration>(frame_duration);
+
+	std::this_thread::sleep_until(next_frame);
+	context.last_frame_time = std::chrono::steady_clock::now();
 }

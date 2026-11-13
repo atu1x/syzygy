@@ -302,11 +302,113 @@ namespace syzygy {
 	}
 }
 
-inline syzygy::standard::screen_context syzygy::standard::core::win::get_screen_information(instance_context& context) { return {}; }
-inline bool syzygy::standard::core::win::create_overlay(instance_context& context) { return false; }
-inline bool syzygy::standard::core::win::destroy_overlay(instance_context& context) { return false; }
-inline void syzygy::standard::core::win::present(instance_context& context) {}
-inline void syzygy::standard::core::win::vsync(instance_context& context) {}
+#if defined(_WIN32) || defined(_WIN64)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <dwmapi.h>
+#pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "gdi32.lib")
+#pragma comment(lib, "user32.lib")
+#endif
+
+inline syzygy::standard::screen_context syzygy::standard::core::win::get_screen_information(instance_context& context) {
+	screen_context info = {};
+#if defined(_WIN32) || defined(_WIN64)
+	DEVMODEW dm = {};
+	dm.dmSize = sizeof(dm);
+	if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm)) {
+		info.resolution = { 0.f, 0.f, static_cast<float>(dm.dmPelsWidth), static_cast<float>(dm.dmPelsHeight) };
+		info.refresh_rate = static_cast<float>(dm.dmDisplayFrequency);
+	}
+
+	if (context.target_window) {
+		RECT rect = {};
+		GetWindowRect(static_cast<HWND>(context.target_window), &rect);
+		info.field = { static_cast<float>(rect.left), static_cast<float>(rect.top), static_cast<float>(rect.right), static_cast<float>(rect.bottom) };
+	}
+	else {
+		info.field = info.resolution;
+	}
+#endif
+	return info;
+}
+
+inline bool syzygy::standard::core::win::create_overlay(instance_context& context) {
+#if defined(_WIN32) || defined(_WIN64)
+	WNDCLASSEXW wc = { sizeof(WNDCLASSEXW), CS_HREDRAW | CS_VREDRAW, DefWindowProcW, 0, 0, GetModuleHandleW(nullptr), nullptr, nullptr, nullptr, nullptr, L"syzygy_overlay", nullptr };
+	RegisterClassExW(&wc);
+
+	int x = static_cast<int>(context.screen.field.x);
+	int y = static_cast<int>(context.screen.field.y);
+	int w = static_cast<int>(context.screen.field.z - context.screen.field.x);
+	int h = static_cast<int>(context.screen.field.w - context.screen.field.y);
+
+	HWND hwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_TOOLWINDOW, wc.lpszClassName, L"syzygy", WS_POPUP, x, y, w, h, nullptr, nullptr, wc.hInstance, nullptr);
+	if (!hwnd) return false;
+
+	SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+	MARGINS margins = { -1, -1, -1, -1 };
+	DwmExtendFrameIntoClientArea(hwnd, &margins);
+
+	ShowWindow(hwnd, SW_SHOWDEFAULT);
+	context.overlay_window = hwnd;
+	return true;
+#else
+	return false;
+#endif
+}
+
+inline bool syzygy::standard::core::win::destroy_overlay(instance_context& context) {
+#if defined(_WIN32) || defined(_WIN64)
+	if (!context.overlay_window) return false;
+	DestroyWindow(static_cast<HWND>(context.overlay_window));
+	context.overlay_window = nullptr;
+	return true;
+#else
+	return false;
+#endif
+}
+
+inline void syzygy::standard::core::win::present(instance_context& context) {
+#if defined(_WIN32) || defined(_WIN64)
+	HWND hwnd = static_cast<HWND>(context.overlay_window);
+	if (!hwnd || context.pixels.empty()) return;
+
+	MSG msg = {};
+	while (PeekMessageW(&msg, hwnd, 0, 0, PM_REMOVE)) {
+		TranslateMessage(&msg);
+		DispatchMessageW(&msg);
+	}
+
+	int x = static_cast<int>(context.screen.field.x);
+	int y = static_cast<int>(context.screen.field.y);
+	int w = static_cast<int>(context.screen.field.z - context.screen.field.x);
+	int h = static_cast<int>(context.screen.field.w - context.screen.field.y);
+	SetWindowPos(hwnd, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE);
+
+	HDC hdc = GetDC(hwnd);
+	BITMAPINFO bmi = {};
+	bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bmi.bmiHeader.biWidth = w;
+	bmi.bmiHeader.biHeight = -h; //reversed because of up-side down prevention
+	bmi.bmiHeader.biPlanes = 1;
+	bmi.bmiHeader.biBitCount = 32;
+	bmi.bmiHeader.biCompression = BI_RGB;
+
+	StretchDIBits(hdc, 0, 0, w, h, 0, 0, w, h, context.pixels.data(), &bmi, DIB_RGB_COLORS, SRCCOPY);
+	ReleaseDC(hwnd, hdc);
+#endif
+}
+
+inline void syzygy::standard::core::win::vsync(instance_context& context) {
+#if defined(_WIN32) || defined(_WIN64)
+	if (FAILED(DwmFlush())) {
+		syzygy::standard::core::unknown::vsync(context);
+	}
+#endif
+}
 
 inline syzygy::standard::screen_context syzygy::standard::core::mac::get_screen_information(instance_context& context) { return {}; }
 inline bool syzygy::standard::core::mac::create_overlay(instance_context& context) { return false; }
@@ -332,7 +434,7 @@ inline bool syzygy::standard::core::unknown::destroy_overlay(instance_context& c
 inline void syzygy::standard::core::unknown::present(instance_context& context) {}
 inline void syzygy::standard::core::unknown::vsync(instance_context& context) {
 	float fps = context.screen.refresh_rate > 0.f ? context.screen.refresh_rate : 60.f;
-	auto frame_duration = std::chrono::duration< float, std::milli >(1000.f / fps);
+	auto frame_duration = std::chrono::duration<float, std::milli>(1000.f / fps);
 	auto next_frame = context.last_frame_time + std::chrono::duration_cast<std::chrono::steady_clock::duration>(frame_duration);
 
 	std::this_thread::sleep_until(next_frame);

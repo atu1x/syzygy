@@ -214,14 +214,14 @@ namespace syzygy {
 			inline void thread_handling(instance_context* instance) {
 				if (!instance) return;
 
-				// create_overlay(*instance);
+				create_overlay(*instance);
 
 				instance->render_state = render_state_list::running;
 
 				while (instance->render_state == render_state_list::running) {
-					//initialization of canvas / command list
+					instance->screen = syzygy::standard::backend::get_screen_information(*instance);
 
-					//resize / pixel buffer
+					//resize / pixel buffer, initialization of canvas / command list
 					int canvas_w = static_cast<int>(instance->screen.field.z - instance->screen.field.x);
 					int canvas_h = static_cast<int>(instance->screen.field.w - instance->screen.field.y);
 					size_t required_size = static_cast<size_t>(std::max(0, canvas_w) * std::max(0, canvas_h));
@@ -243,12 +243,12 @@ namespace syzygy {
 
 					//literally function name explains. no explanation needed.
 					syzygy::standard::backend::accomplish_command_request(*instance);
-					//present(*instance);
-					//vsync(*instance);
+					present(*instance);
+					vsync(*instance);
 				}
 
 				//destruction of window (when closed)
-				//destroy_overlay(*instance);
+				destroy_overlay(*instance);
 			}
 		}
 

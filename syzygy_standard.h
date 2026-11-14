@@ -79,11 +79,12 @@ namespace syzygy {
 
 		//commands
 		struct drawrect_context { syzvec4 field; uint32_t color; float opacity; float rounding; };
+		struct drawtext_context { syzvec2 position; std::string string; uint32_t color; float opacity; float textsize; };
 
-		enum class command_variants { rect };
+		enum class command_variants { rect, text };
 		struct command_context {
 			command_variants variant = {};
-			std::variant<drawrect_context> context = {};
+			std::variant<drawrect_context, drawtext_context> context = {};
 		};
 
 		//instance structure def
@@ -221,37 +222,41 @@ namespace syzygy {
 				return r + 0.5f - std::sqrt(dist_sq);
 			}
 
-			inline void internal_drawrect(instance_context& instance, const drawrect_context& rect) {
+			inline void internal_drawrect(instance_context& instance, const drawrect_context& argument) {
 				int canvas_w = static_cast<int>(instance.screen.field.z - instance.screen.field.x);
 				int canvas_h = static_cast<int>(instance.screen.field.w - instance.screen.field.y);
-				if (canvas_w <= 0 || canvas_h <= 0 || rect.opacity <= 0.f) return;
+				if (canvas_w <= 0 || canvas_h <= 0 || argument.opacity <= 0.f) return;
 
-				int start_x = std::clamp(static_cast<int>(rect.field.x), 0, canvas_w);
-				int start_y = std::clamp(static_cast<int>(rect.field.y), 0, canvas_h);
-				int end_x = std::clamp(static_cast<int>(rect.field.z), 0, canvas_w);
-				int end_y = std::clamp(static_cast<int>(rect.field.w), 0, canvas_h);
+				int start_x = std::clamp(static_cast<int>(argument.field.x), 0, canvas_w);
+				int start_y = std::clamp(static_cast<int>(argument.field.y), 0, canvas_h);
+				int end_x = std::clamp(static_cast<int>(argument.field.z), 0, canvas_w);
+				int end_y = std::clamp(static_cast<int>(argument.field.w), 0, canvas_h);
 				if (start_x >= end_x || start_y >= end_y) return; //guard
 
-				float max_r = std::min(rect.field.z - rect.field.x, rect.field.w - rect.field.y) * 0.5f;
-				float r = std::clamp(rect.rounding, 0.f, max_r);
-				uint32_t alpha = static_cast<uint32_t>(((rect.color >> 24) & 0xFF) * std::clamp(rect.opacity, 0.f, 1.f));
+				float max_r = std::min(argument.field.z - argument.field.x, argument.field.w - argument.field.y) * 0.5f;
+				float r = std::clamp(argument.rounding, 0.f, max_r);
+				uint32_t alpha = static_cast<uint32_t>(((argument.color >> 24) & 0xFF) * std::clamp(argument.opacity, 0.f, 1.f));
 
 				if (alpha == 255 && r <= 0.f) { //untransparent
 					for (int y = start_y; y < end_y; ++y) {
-						std::fill(instance.pixels.data() + (y * canvas_w + start_x), instance.pixels.data() + (y * canvas_w + end_x), rect.color | 0xFF000000u);
+						std::fill(instance.pixels.data() + (y * canvas_w + start_x), instance.pixels.data() + (y * canvas_w + end_x), argument.color | 0xFF000000u);
 					}
 					return;
 				}
 
 				for (int y = start_y; y < end_y; ++y) {
 					for (int x = start_x; x < end_x; ++x) {
-						float corner_a = get_corner_alpha(x, y, rect.field, r);
+						float corner_a = get_corner_alpha(x, y, argument.field, r);
 						if (corner_a <= 0.f) continue;
 
 						uint32_t& pixel = instance.pixels[y * canvas_w + x];
-						pixel = accomplish_opacity(pixel, rect.color, rect.opacity * corner_a);
+						pixel = accomplish_opacity(pixel, argument.color, argument.opacity * corner_a);
 					}
 				}
+			}
+
+			inline void internal_drawtext(instance_context& instance, const drawtext_context& argument) {
+				//nothing. what did you want? get out.
 			}
 
 			inline void accomplish_command_request(instance_context& instance) {
@@ -264,6 +269,10 @@ namespace syzygy {
 				for (const auto& cmd : local_list) {
 					if (cmd.variant == command_variants::rect) {
 						syzygy::standard::backend::internal_drawrect(instance, std::get<drawrect_context>(cmd.context));
+						continue;
+					}
+					if (cmd.variant == command_variants::text) {
+						syzygy::standard::backend::internal_drawtext(instance, std::get<drawtext_context>(cmd.context));
 						continue;
 					}
 				}
@@ -363,6 +372,11 @@ namespace syzygy {
 			static void drawrect(instance_context& instance, syzvec4 field, uint32_t color, float opacity = 1.f, float rounding = 0.f) {
 				std::lock_guard<std::mutex> lock(instance.command_mutex);
 				instance.command_list.push_back({ command_variants::rect, drawrect_context{ field, color, opacity, rounding } });
+			}
+
+			static void drawtext(instance_context& instance, const std::string& string, syzvec2 position, uint32_t color, float opacity = 1.f, float textsize = 18.f) {
+				std::lock_guard<std::mutex> lock(instance.command_mutex);
+				instance.command_list.push_back({ command_variants::text, drawtext_context{ position, string, color, opacity, textsize } });
 			}
 
 			static void destroy_instance(instance_context* instance) {

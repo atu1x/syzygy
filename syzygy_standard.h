@@ -73,7 +73,7 @@ namespace syzygy {
 
 		//base
 		enum class render_state_list { uninitialized, initializing, running, stopping, failed };
-		enum class fail_reason_list {};
+		enum class fail_reason_list { unsupported_device, invalid_target_window, failed_obtainment_of_screen_info, failed_overlay_creation, failed_destruction_of_overlay, invalid_callback };
 		enum class device_list { win, mac, linux_x11, linux_wayland, unknown };
 		struct screen_context { syzvec4 resolution; syzvec4 field; float refresh_rate = 60.f; };
 
@@ -114,8 +114,17 @@ namespace syzygy {
 
 		namespace logger {
 			inline std::vector<std::string> history;
-			inline void send(const std::string& string) {
-				history.push_back(string);
+			inline std::mutex log_mutex = {};
+
+			inline void send(const std::string& message) {
+				std::lock_guard<std::mutex> lock(log_mutex);
+				history.push_back(message);
+			}
+
+			inline void report_fail(instance_context& instance, fail_reason_list reason, const std::string& message) {
+				instance.fail_reasons.push_back(reason);
+				instance.render_state = render_state_list::failed;
+				send(message);
 			}
 		}
 
@@ -212,14 +221,39 @@ namespace syzygy {
 			}
 
 			inline void thread_handling(instance_context* instance) {
-				if (!instance) return;
+				if (!instance) {
+					syzygy::standard::logger::send("Thread handling failed: instance is null.");
+					return;
+				}
 
-				create_overlay(*instance);
+				if (!instance->callback) {
+					syzygy::standard::logger::report_fail(*instance, fail_reason_list::invalid_callback, "Invalid callback.");
+					return;
+				}
 
-				instance->render_state = render_state_list::running;
+				if (!create_overlay(*instance)) {
+					logger::report_fail(*instance, fail_reason_list::failed_overlay_creation, "Failed to create overlay window.");
+					return;
+				}
+
+				render_state_list expected = render_state_list::initializing;
+				if (!instance->render_state.compare_exchange_strong(expected, render_state_list::running)) {
+					logger::report_fail(*instance, fail_reason_list::failed_overlay_creation, "Expected status couldn't match. (initializing - running)");
+					destroy_overlay(*instance);
+					return;
+				}
 
 				while (instance->render_state == render_state_list::running) {
 					instance->screen = syzygy::standard::backend::get_screen_information(*instance);
+					if (instance->screen.field.z - instance->screen.field.x <= 0.f || instance->screen.field.w - instance->screen.field.y <= 0.f) {
+						if (instance->target_window) {
+							logger::report_fail(*instance, fail_reason_list::invalid_target_window, "Invalid or closed target window.");
+						}
+						else {
+							logger::report_fail(*instance, fail_reason_list::failed_obtainment_of_screen_info, "Failed to get screen information.");
+						}
+						break;
+					}
 
 					//resize / pixel buffer, initialization of canvas / command list
 					int canvas_w = static_cast<int>(instance->screen.field.z - instance->screen.field.x);
@@ -248,7 +282,9 @@ namespace syzygy {
 				}
 
 				//destruction of window (when closed)
-				destroy_overlay(*instance);
+				if (!destroy_overlay(*instance)) {
+					logger::report_fail(*instance, fail_reason_list::failed_destruction_of_overlay, "Failed to destroy overlay window.");
+				}
 			}
 		}
 

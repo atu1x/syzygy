@@ -194,18 +194,63 @@ namespace syzygy {
 				else syzygy::standard::core::unknown::vsync(instance);
 			}
 
+			//literally it is in charge of opacity
+			inline uint32_t accomplish_opacity(uint32_t bg, uint32_t fg, float opacity) {
+				uint32_t alpha = static_cast<uint32_t>(((fg >> 24) & 0xFF) * std::clamp(opacity, 0.f, 1.f));
+				if (alpha == 0) return bg;
+				if (alpha == 255) return fg | 0xFF000000u;
+
+				uint32_t inv_alpha = 256 - alpha;
+				uint32_t fg_full = fg | 0xFF000000u;
+				uint32_t rb = ((((fg_full & 0x00FF00FFu) * alpha) + ((bg & 0x00FF00FFu) * inv_alpha)) >> 8) & 0x00FF00FFu;
+				uint32_t ag = (((((fg_full >> 8) & 0x00FF00FFu) * alpha) + (((bg >> 8) & 0x00FF00FFu) * inv_alpha))) & 0xFF00FF00u;
+				return rb | ag;
+			}
+
+			inline float get_corner_alpha(int x, int y, const syzvec4& field, float r) {
+				if (r <= 0.f) return 1.f;
+				float px = x + 0.5f;
+				float py = y + 0.5f;
+				float dx = std::max(field.x + r - px, std::max(0.f, px - (field.z - r)));
+				float dy = std::max(field.y + r - py, std::max(0.f, py - (field.w - r)));
+				if (dx <= 0.f || dy <= 0.f) return 1.f;
+
+				float dist_sq = dx * dx + dy * dy;
+				if (dist_sq >= (r + 0.5f) * (r + 0.5f)) return 0.f;
+				if (dist_sq <= (r - 0.5f) * (r - 0.5f)) return 1.f;
+				return r + 0.5f - std::sqrt(dist_sq);
+			}
+
 			inline void internal_drawrect(instance_context& instance, const drawrect_context& rect) {
 				int canvas_w = static_cast<int>(instance.screen.field.z - instance.screen.field.x);
 				int canvas_h = static_cast<int>(instance.screen.field.w - instance.screen.field.y);
-				if (canvas_w <= 0 || canvas_h <= 0) return;
+				if (canvas_w <= 0 || canvas_h <= 0 || rect.opacity <= 0.f) return;
 
 				int start_x = std::clamp(static_cast<int>(rect.field.x), 0, canvas_w);
 				int start_y = std::clamp(static_cast<int>(rect.field.y), 0, canvas_h);
 				int end_x = std::clamp(static_cast<int>(rect.field.z), 0, canvas_w);
 				int end_y = std::clamp(static_cast<int>(rect.field.w), 0, canvas_h);
+				if (start_x >= end_x || start_y >= end_y) return; //guard
+
+				float max_r = std::min(rect.field.z - rect.field.x, rect.field.w - rect.field.y) * 0.5f;
+				float r = std::clamp(rect.rounding, 0.f, max_r);
+				uint32_t alpha = static_cast<uint32_t>(((rect.color >> 24) & 0xFF) * std::clamp(rect.opacity, 0.f, 1.f));
+
+				if (alpha == 255 && r <= 0.f) { //untransparent
+					for (int y = start_y; y < end_y; ++y) {
+						std::fill(instance.pixels.data() + (y * canvas_w + start_x), instance.pixels.data() + (y * canvas_w + end_x), rect.color | 0xFF000000u);
+					}
+					return;
+				}
 
 				for (int y = start_y; y < end_y; ++y) {
-					std::fill(instance.pixels.data() + (y * canvas_w + start_x), instance.pixels.data() + (y * canvas_w + end_x), rect.color);
+					for (int x = start_x; x < end_x; ++x) {
+						float corner_a = get_corner_alpha(x, y, rect.field, r);
+						if (corner_a <= 0.f) continue;
+
+						uint32_t& pixel = instance.pixels[y * canvas_w + x];
+						pixel = accomplish_opacity(pixel, rect.color, rect.opacity * corner_a);
+					}
 				}
 			}
 

@@ -205,17 +205,21 @@ namespace syzygy {
 				int end_y = std::clamp(static_cast<int>(rect.field.w), 0, canvas_h);
 
 				for (int y = start_y; y < end_y; ++y) {
-					for (int x = start_x; x < end_x; ++x) {
-						instance.pixels[y * canvas_w + x] = rect.color;
-					}
+					std::fill(instance.pixels.data() + (y * canvas_w + start_x), instance.pixels.data() + (y * canvas_w + end_x), rect.color);
 				}
 			}
 
 			inline void accomplish_command_request(instance_context& instance) {
-				std::lock_guard<std::mutex> lock(instance.command_mutex);
-				for (const auto& cmd : instance.command_list) {
+				std::vector<command_context> local_list;
+				{
+					std::lock_guard<std::mutex> lock(instance.command_mutex);
+					std::swap(instance.command_list, local_list);
+				}
+
+				for (const auto& cmd : local_list) {
 					if (cmd.variant == command_variants::rect) {
 						syzygy::standard::backend::internal_drawrect(instance, std::get<drawrect_context>(cmd.context));
+						continue;
 					}
 				}
 			}
@@ -238,7 +242,9 @@ namespace syzygy {
 
 				render_state_list expected = render_state_list::initializing;
 				if (!instance->render_state.compare_exchange_strong(expected, render_state_list::running)) {
-					logger::report_fail(*instance, fail_reason_list::failed_overlay_creation, "Expected status couldn't match. (initializing - running)");
+					if (expected != render_state_list::stopping) {
+						logger::report_fail(*instance, fail_reason_list::failed_overlay_creation, "Expected status couldn't match. (initializing - running)");
+					}
 					destroy_overlay(*instance);
 					return;
 				}
@@ -258,17 +264,13 @@ namespace syzygy {
 					//resize / pixel buffer, initialization of canvas / command list
 					int canvas_w = static_cast<int>(instance->screen.field.z - instance->screen.field.x);
 					int canvas_h = static_cast<int>(instance->screen.field.w - instance->screen.field.y);
-					size_t required_size = static_cast<size_t>(std::max(0, canvas_w) * std::max(0, canvas_h));
+					size_t required_size = static_cast<size_t>(std::max(0, canvas_w)) * static_cast<size_t>(std::max(0, canvas_h));
 
 					if (instance->pixels.size() != required_size) {
 						instance->pixels.resize(required_size);
 					}
 
 					std::fill(instance->pixels.begin(), instance->pixels.end(), instance->transparent_color);
-					{
-						std::lock_guard<std::mutex> lock(instance->command_mutex);
-						instance->command_list.clear();
-					}
 
 					//check callback
 					if (instance->callback) {
@@ -306,10 +308,11 @@ namespace syzygy {
 				new_instance->target_window = target_window;
 				new_instance->screen = backend::get_screen_information(*new_instance);
 
-				new_instance->render_thread = std::thread(backend::thread_handling, new_instance.get());
-
+				//writing pointer instead of ptr is my habit, dont care about it.
 				syzygy::standard::database::instances.push_back(std::move(new_instance));
-				return syzygy::standard::database::instances.back().get();
+				auto* instance_pointer = syzygy::standard::database::instances.back().get();
+				instance_pointer->render_thread = std::thread(backend::thread_handling, instance_pointer);
+				return instance_pointer;
 			}
 
 			static void drawrect(instance_context& instance, syzvec4 field, uint32_t color, float opacity = 1.f, float rounding = 0.f) {
@@ -321,7 +324,7 @@ namespace syzygy {
 				if (!instance) return;
 
 				instance->render_state = render_state_list::stopping;
-				if (instance->render_thread.joinable()) {
+				if (instance->render_thread.joinable() && instance->render_thread.get_id() != std::this_thread::get_id()) {
 					instance->render_thread.join();
 				}
 
@@ -350,13 +353,15 @@ namespace syzygy {
 #endif
 
 inline syzygy::standard::screen_context syzygy::standard::core::win::get_screen_information(instance_context& context) {
-	screen_context info = {};
+	screen_context info = context.screen;
 #if defined(_WIN32) || defined(_WIN64)
-	DEVMODEW dm = {};
-	dm.dmSize = sizeof(dm);
-	if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm)) {
-		info.resolution = { 0.f, 0.f, static_cast<float>(dm.dmPelsWidth), static_cast<float>(dm.dmPelsHeight) };
-		info.refresh_rate = static_cast<float>(dm.dmDisplayFrequency);
+	if (info.resolution.z <= 0.f) {
+		DEVMODEW dm = {};
+		dm.dmSize = sizeof(dm);
+		if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm)) {
+			info.resolution = { 0.f, 0.f, static_cast<float>(dm.dmPelsWidth), static_cast<float>(dm.dmPelsHeight) };
+			info.refresh_rate = static_cast<float>(dm.dmDisplayFrequency);
+		}
 	}
 
 	if (context.target_window) {
@@ -381,14 +386,14 @@ inline bool syzygy::standard::core::win::create_overlay(instance_context& contex
 	int w = static_cast<int>(context.screen.field.z - context.screen.field.x);
 	int h = static_cast<int>(context.screen.field.w - context.screen.field.y);
 
-	HWND hwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_TOOLWINDOW, wc.lpszClassName, L"syzygy", WS_POPUP, x, y, w, h, nullptr, nullptr, wc.hInstance, nullptr);
+	HWND hwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, wc.lpszClassName, L"syzygy", WS_POPUP, x, y, w, h, nullptr, nullptr, wc.hInstance, nullptr);
 	if (!hwnd) return false;
 
 	SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
 	MARGINS margins = { -1, -1, -1, -1 };
 	DwmExtendFrameIntoClientArea(hwnd, &margins);
 
-	ShowWindow(hwnd, SW_SHOWDEFAULT);
+	ShowWindow(hwnd, SW_SHOWNOACTIVATE);
 	context.overlay_window = hwnd;
 	return true;
 #else
@@ -422,7 +427,9 @@ inline void syzygy::standard::core::win::present(instance_context& context) {
 	int y = static_cast<int>(context.screen.field.y);
 	int w = static_cast<int>(context.screen.field.z - context.screen.field.x);
 	int h = static_cast<int>(context.screen.field.w - context.screen.field.y);
-	SetWindowPos(hwnd, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE);
+	if (context.target_window) {
+		SetWindowPos(hwnd, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE);
+	}
 
 	HDC hdc = GetDC(hwnd);
 	BITMAPINFO bmi = {};
